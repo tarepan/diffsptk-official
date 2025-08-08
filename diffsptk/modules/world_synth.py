@@ -169,32 +169,17 @@ class WorldSynthesis(BaseNonFunctionalModule):
         f_min = self.sample_rate / self.fft_length + 1
         coarse_f0 = torch.where(f0 < f_min, 0, f0).detach()
         coarse_vuv = (0 < coarse_f0).type(coarse_f0.dtype)
-        time_axis = (
-            torch.arange(
-                f0.shape[-1] * self.frame_period, device=f0.device, dtype=f0.dtype
-            )
-            / self.sample_rate
-        )
+        time_axis = torch.arange(f0.shape[-1] * self.frame_period, device=f0.device, dtype=f0.dtype) / self.sample_rate
         time_axis = time_axis.repeat(B, 1)
-        coarse_time_axis = torch.arange(
-            coarse_f0.shape[-1], device=coarse_f0.device, dtype=coarse_f0.dtype
-        ) * (self.frame_period / self.sample_rate)
+        coarse_time_axis = torch.arange(coarse_f0.shape[-1], device=coarse_f0.device, dtype=coarse_f0.dtype) * (self.frame_period / self.sample_rate)
         coarse_time_axis = coarse_time_axis.repeat(B, 1)
-        interpolated_f0 = interp1(
-            coarse_time_axis, coarse_f0, time_axis, batching=(True, True)
-        )
-        interpolated_vuv = interp1(
-            coarse_time_axis, coarse_vuv, time_axis, batching=(True, True)
-        )
+        interpolated_f0  = interp1(coarse_time_axis, coarse_f0,  time_axis, batching=(True, True))
+        interpolated_vuv = interp1(coarse_time_axis, coarse_vuv, time_axis, batching=(True, True))
         interpolated_vuv = 0.5 < interpolated_vuv
-        interpolated_f0 = torch.where(
-            interpolated_vuv, interpolated_f0, self.default_f0
-        )
+        interpolated_f0 = torch.where(interpolated_vuv, interpolated_f0, self.default_f0)
 
         # GetPulseLocationsForTimeBase()
-        total_phase = torch.cumsum(
-            TAU / self.sample_rate * interpolated_f0.double(), dim=-1
-        ).type(f0.dtype)
+        total_phase = torch.cumsum(TAU / self.sample_rate * interpolated_f0.double(), dim=-1).type(f0.dtype)
         wrap_phase = torch.fmod(total_phase, TAU)
         wrap_phase_abs = torch.abs(torch.diff(wrap_phase))
         pulse_locations_index = torch.nonzero(torch.pi < wrap_phase_abs, as_tuple=True)
@@ -230,9 +215,7 @@ class WorldSynthesis(BaseNonFunctionalModule):
         H = self.fft_length // 2
         dc_component = periodic_response[..., H:].sum(-1, keepdim=True)
         dd = -dc_component * self.dc_remover
-        periodic_response = torch.cat(
-            (dd[..., :H], periodic_response[..., H:] + dd[..., H:]), dim=-1
-        )
+        periodic_response = torch.cat((dd[..., :H], periodic_response[..., H:] + dd[..., H:]), dim=-1)
         periodic_response = periodic_response * (0.5 < vuv)
 
         # Synthesis()
@@ -240,19 +223,11 @@ class WorldSynthesis(BaseNonFunctionalModule):
         noise_size = noise_size.clip(min=0).unsqueeze(-1)
         sqrt_noise_size = torch.sqrt(noise_size)
         response = periodic_response * sqrt_noise_size / self.fft_length
-        margin = (
-            (self.fft_length + self.frame_period - 1)
-            // self.frame_period
-            * self.frame_period
-        )
+        margin = (self.fft_length + self.frame_period - 1) // self.frame_period * self.frame_period
         T_ = T + margin
         index = (batch_index * T_ + time_index).unsqueeze(-1) + self.ramp
         y = torch.zeros((B, T_), device=sp.device, dtype=sp.dtype)
-        y.view(-1).scatter_add_(
-            dim=-1,
-            index=index.view(-1),
-            src=response.view(-1),
-        )
+        y.view(-1).scatter_add_(dim=-1, index=index.view(-1), src=response.view(-1))
         y = torch.narrow(y, dim=-1, start=H, length=T)
 
         if not is_batched_input:
