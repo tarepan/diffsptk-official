@@ -186,9 +186,6 @@ class WorldSynthesis(BaseNonFunctionalModule):
         pulse_locations = time_axis[pulse_locations_index]
         vuv = interpolated_vuv[pulse_locations_index].unsqueeze(-1)
         batch_index, time_index = pulse_locations_index
-        y1 = wrap_phase[pulse_locations_index] - TAU
-        y2 = wrap_phase[batch_index, time_index + 1]
-        pulse_locations_time_shift = -y1 / (y2 - y1) / self.sample_rate
 
         # GetSpectralEnvelope()
         frame = pulse_locations * (self.sample_rate / self.frame_period)
@@ -199,16 +196,8 @@ class WorldSynthesis(BaseNonFunctionalModule):
 
         # GetPeriodicResponse()
         spectrum = get_minimum_phase_spectrum(spectral_envelope)
-
-        # GetSpectrumWithFractionalTimeShift()
-        coefficient = (
-            TAU * self.sample_rate / self.fft_length * pulse_locations_time_shift
-        )
-        phase = torch.exp(-1j * self.ramp[:D] * coefficient.unsqueeze(-1))
-        periodic_response = torch.fft.hfft(spectrum * phase)
-        periodic_response = torch.cat(
-            [periodic_response[..., :1], periodic_response[..., 1:].flip(-1)], dim=-1
-        )
+        periodic_response = torch.fft.hfft(spectrum)
+        periodic_response = torch.cat([periodic_response[..., :1], periodic_response[..., 1:].flip(-1)], dim=-1)
         periodic_response = torch.fft.fftshift(periodic_response, dim=-1)
 
         # RemoveDCComponent()
