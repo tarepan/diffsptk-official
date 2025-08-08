@@ -210,12 +210,7 @@ class WorldSynthesis(BaseNonFunctionalModule):
         frame_floor = frame.floor().long().clip(max=N - 1)
         frame_ceil = frame.ceil().long().clip(max=N - 1)
         interpolation = (frame - frame_floor).unsqueeze(-1)
-        lower_weight = 1 - interpolation
-        upper_weight = interpolation
-        spectral_envelope = (
-            lower_weight * sp[batch_index, frame_floor]
-            + upper_weight * sp[batch_index, frame_ceil]
-        )
+        spectral_envelope = (1 - interpolation) * sp[batch_index, frame_floor] + interpolation * sp[batch_index, frame_ceil]
 
         # GetPeriodicResponse()
         spectrum = get_minimum_phase_spectrum(spectral_envelope)
