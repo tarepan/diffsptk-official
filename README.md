@@ -143,16 +143,6 @@ pitch = diffsptk.Pitch(
 )
 f0 = pitch(x)
 
-# Extract aperiodicity of x by D4C.
-ap = diffsptk.Aperiodicity(
-    frame_period=fp,
-    sample_rate=sr,
-    fft_length=n_fft,
-    algorithm="d4c",
-    out_format="a",
-)
-A = ap(x, f0)
-
 # Extract spectral envelope of x by CheapTrick.
 pitch_spec = diffsptk.PitchAdaptiveSpectralAnalysis(
     frame_period=fp,
@@ -169,7 +159,7 @@ world_synth = diffsptk.WorldSynthesis(
     sample_rate=sr,
     fft_length=n_fft,
 )
-x_hat = world_synth(f0, A, S)
+x_hat = world_synth(f0, S)
 
 # Write reconstructed waveform.
 diffsptk.write("reconst.wav", x_hat, sr)

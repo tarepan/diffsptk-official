@@ -20,6 +20,7 @@ import diffsptk
 import tests.utils as U
 
 
+# NOTE: No working now. `WorldSynthesis` change the aperiodicity argument.
 def test_compatibility(device, dtype, P=80, sr=16000, L=1024, B=2):
     world_synth = diffsptk.WorldSynthesis(P, sr, L, device=device, dtype=dtype)
 

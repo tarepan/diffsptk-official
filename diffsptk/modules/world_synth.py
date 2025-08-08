@@ -115,18 +115,13 @@ class WorldSynthesis(BaseNonFunctionalModule):
         dc_remover = torch.cat([dc_remover, dc_remover.flip(-1)], dim=-1)
         self.register_buffer("dc_remover", to(dc_remover, dtype=dtype))
 
-    def forward(
-        self, f0: torch.Tensor, ap: torch.Tensor, sp: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, f0: torch.Tensor, sp: torch.Tensor) -> torch.Tensor:
         """Synthesize speech using WORLD vocoder.
 
         Parameters
         ----------
         f0 : Tensor [shape=(B, T/P) or (T/P,)]
             The F0 in Hz.
-
-        ap : Tensor [shape=(B, T/P, L/2+1) or (T/P, L/2+1)]
-            The aperiodicity in [0, 1].
 
         sp : Tensor [shape=(B, T/P, L/2+1) or (T/P, L/2+1)]
             The spectral envelope (power spectrum).
@@ -141,12 +136,10 @@ class WorldSynthesis(BaseNonFunctionalModule):
         >>> x = diffsptk.sin(1000, 80)
         >>> pitch = diffsptk.Pitch(160, 8000, out_format="f0")
         >>> f0 = pitch(x)
-        >>> aperiodicity = diffsptk.Aperiodicity(160, 16000, 1024)
-        >>> ap = aperiodicity(x, f0)
         >>> pitch_spec = diffsptk.PitchAdaptiveSpectralAnalysis(160, 8000, 1024)
         >>> sp = pitch_spec(x, f0)
         >>> world_synth = diffsptk.WorldSynthesis(160, 8000, 1024)
-        >>> y = world_synth(f0, ap, sp)
+        >>> y = world_synth(f0, sp)
         >>> y.shape
         torch.Size([1120])
 
@@ -154,20 +147,15 @@ class WorldSynthesis(BaseNonFunctionalModule):
         is_batched_input = f0.ndim == 2
         if not is_batched_input:
             f0 = f0.unsqueeze(0)
-            ap = ap.unsqueeze(0)
             sp = sp.unsqueeze(0)
 
         # Check the input shape.
         if f0.dim() != 2:
             raise ValueError("f0 must be 1D or 2D tensor.")
-        if ap.dim() != 3 or sp.dim() != 3:
-            raise ValueError("ap and sp must be 2D or 3D tensor.")
-        if len(set([f0.shape[0], ap.shape[0], sp.shape[0]])) != 1:
-            raise ValueError("f0, ap, and sp must have the same batch size.")
-        if len(set([f0.shape[1], ap.shape[1], sp.shape[1]])) != 1:
-            raise ValueError("f0, ap, and sp must have the same length.")
-        if len(set([ap.shape[2], sp.shape[2]])) != 1:
-            raise ValueError("ap and sp must have the same dimension.")
+        if len(set([f0.shape[0], sp.shape[0]])) != 1:
+            raise ValueError("f0 and sp must have the same batch size.")
+        if len(set([f0.shape[1], sp.shape[1]])) != 1:
+            raise ValueError("f0 and sp must have the same length.")
 
         # Get the input shape.
         B, N, D = sp.shape
@@ -175,7 +163,6 @@ class WorldSynthesis(BaseNonFunctionalModule):
 
         # Restrict the input range.
         eps = 1e-6
-        ap = torch.clip(ap, min=eps, max=1 - eps)
         sp = torch.clip(sp, min=eps)
 
         # GetTemporalParametersForTimeBase()
@@ -230,15 +217,8 @@ class WorldSynthesis(BaseNonFunctionalModule):
             + upper_weight * sp[batch_index, frame_ceil]
         )
 
-        # GetAperiodicRatio()
-        aperiodic_ratio = (
-            lower_weight * ap[batch_index, frame_floor]
-            + upper_weight * ap[batch_index, frame_ceil]
-        ) ** 2
-
         # GetPeriodicResponse()
-        weight = 1 - aperiodic_ratio
-        spectrum = get_minimum_phase_spectrum(weight * spectral_envelope)
+        spectrum = get_minimum_phase_spectrum(spectral_envelope)
 
         # GetSpectrumWithFractionalTimeShift()
         coefficient = (
@@ -260,33 +240,11 @@ class WorldSynthesis(BaseNonFunctionalModule):
         )
         periodic_response = periodic_response * (0.5 < vuv)
 
-        # GetNoiseSpectrum()
+        # Synthesis()
         noise_size = torch.diff(time_index, append=time_index[-1:])
         noise_size = noise_size.clip(min=0).unsqueeze(-1)
-        noise_waveform = torch.randn_like(periodic_response)
-        mask = self.ramp < noise_size
-        noise_waveform = noise_waveform * mask
-        average = noise_waveform.sum(dim=-1, keepdim=True) / noise_size
-        average = torch.nan_to_num(average)
-        noise_waveform = (noise_waveform - average) * mask
-        noise_spectrum = torch.fft.rfft(noise_waveform)
-
-        # GetAperiodicResponse()
-        weight = torch.where(0 < vuv, aperiodic_ratio, 1)
-        spectrum = (
-            get_minimum_phase_spectrum(weight * spectral_envelope) * noise_spectrum
-        )
-        aperiodic_response = torch.fft.hfft(spectrum)
-        aperiodic_response = torch.cat(
-            [aperiodic_response[..., :1], aperiodic_response[..., 1:].flip(-1)], dim=-1
-        )
-        aperiodic_response = torch.fft.fftshift(aperiodic_response, dim=-1)
-
-        # Synthesis()
         sqrt_noise_size = torch.sqrt(noise_size)
-        response = (
-            periodic_response * sqrt_noise_size + aperiodic_response
-        ) / self.fft_length
+        response = periodic_response * sqrt_noise_size / self.fft_length
         margin = (
             (self.fft_length + self.frame_period - 1)
             // self.frame_period
