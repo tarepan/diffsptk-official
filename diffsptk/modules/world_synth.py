@@ -162,7 +162,7 @@ class WorldSynthesis(BaseNonFunctionalModule):
         T = N * self.frame_period
 
         # Restrict the input range.
-        eps = 1e-6
+        eps = 1e-12
         sp = torch.clip(sp, min=eps)
 
         # GetTemporalParametersForTimeBase()
